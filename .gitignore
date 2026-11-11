@@ -6,3 +6,7 @@ web-build/
 .DS_Store
 .env
 .env.local
+
+# Local-only test videos (other people's clips: never commit or submit)
+assets/test-videos/
+src/testVideos.local.ts

@@ -1,116 +1,94 @@
-
 import React, { memo, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useVideoPlayer, VideoView, type VideoSource } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { COLORS, VIDEO_COUNT, VIDEO_MUTED } from '../config';
-import { tintFor, videoFor } from '../videos';
+import type { Clip } from '../clips';
+import { COLORS, TYPE, VIDEO_MUTED } from '../config';
+import { ClipArt } from './ClipArt';
 
 type Props = {
   index: number;
-  height: number;
+  clip: Clip;
   width: number;
+  height: number;
   active: boolean;
-  onVideoStarted: (index: number) => void;
+  playing: boolean;
+  saved: boolean;
+  /** 0..1 through the current play of the clip (active item only). */
+  progress: number;
+  topInset: number;
+  onTogglePause: () => void;
+  onSave: (index: number) => void;
+  onNext: () => void;
 };
 
 const DOUBLE_TAP_MS = 280;
 
 function FeedItemBase({
   index,
-  height,
+  clip,
   width,
+  height,
   active,
-  onVideoStarted,
+  playing,
+  saved,
+  progress,
+  topInset,
+  onTogglePause,
+  onSave,
+  onNext,
 }: Props) {
   const [liked, setLiked] = useState(false);
-  const [paused, setPaused] = useState(false);
-
   const lastTap = useRef(0);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startedRef = useRef(false);
 
-  const player = useVideoPlayer(videoFor(index), (p) => {
-    p.loop = true;
-    p.muted = VIDEO_MUTED;
-  });
-
-  // Subscribe once per player. Count only its first actual playback start.
-  useEffect(() => {
-    const subscription = player.addListener(
-      'playingChange',
-      ({ isPlaying }) => {
-        if (isPlaying && active && !paused && !startedRef.current) {
-          startedRef.current = true;
-          onVideoStarted(index);
-        }
-      },
-    );
-
-    return () => subscription.remove();
-  }, [player, index, active, paused, onVideoStarted]);
-
-  // Start immediately when this item becomes active.
-  useEffect(() => {
-    if (active && !paused) {
-      player.play();
-    } else {
-      player.pause();
-    }
-  }, [active, paused, player]);
-
-  // Reset inactive videos so they start from the beginning next time.
-  useEffect(() => {
-    if (!active) {
-      player.currentTime = 0;
-      setPaused(false);
-    }
-  }, [active, player]);
-
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       if (tapTimer.current) clearTimeout(tapTimer.current);
-    };
-  }, []);
+    },
+    [],
+  );
 
+  // Single tap pauses, double tap likes.
   const onPress = () => {
     const now = Date.now();
-
     if (now - lastTap.current < DOUBLE_TAP_MS) {
       if (tapTimer.current) clearTimeout(tapTimer.current);
       lastTap.current = 0;
       setLiked(true);
     } else {
       lastTap.current = now;
-      tapTimer.current = setTimeout(() => {
-        setPaused((previous) => !previous);
-      }, DOUBLE_TAP_MS);
+      tapTimer.current = setTimeout(onTogglePause, DOUBLE_TAP_MS);
     }
   };
 
-  const n = (index % VIDEO_COUNT) + 1;
-  const likes = 1200 + ((n * 7919) % 90000) + (liked ? 1 : 0);
+  const likes = 1200 + ((clip.id * 7919) % 90000) + (liked ? 1 : 0);
 
   return (
     <View
-      style={{
-        width,
-        height,
-        backgroundColor: tintFor(index),
+      style={{ width, height, backgroundColor: COLORS.bg }}
+      // M16: swipe isn't the only way on. VoiceOver users get "Next clip" and "Save".
+      accessible
+      accessibilityLabel={`${clip.user}. ${clip.caption}`}
+      accessibilityActions={[
+        { name: 'next', label: 'Next clip' },
+        { name: 'save', label: saved ? 'Remove from Saved' : 'Save' },
+      ]}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'next') onNext();
+        if (e.nativeEvent.actionName === 'save') onSave(index);
       }}
     >
       <Pressable style={StyleSheet.absoluteFill} onPress={onPress}>
-        <VideoView
-          player={player}
-          style={StyleSheet.absoluteFill}
-          contentFit="cover"
-          nativeControls={false}
-          allowsPictureInPicture={false}
-        />
+        {clip.source ? (
+          <ClipVideo source={clip.source} active={active} playing={playing} />
+        ) : (
+          <ClipArt clip={clip} size="full" />
+        )}
       </Pressable>
 
-      {paused && active && (
+      {active && !playing && (
         <View pointerEvents="none" style={styles.pauseWrap}>
           <Text style={styles.pauseGlyph}>▶</Text>
         </View>
@@ -118,118 +96,138 @@ function FeedItemBase({
 
       <LinearGradient
         pointerEvents="none"
-        colors={['transparent', 'rgba(0,0,0,0.72)']}
+        colors={['transparent', 'rgba(0,0,0,0.75)']}
         style={styles.gradient}
       />
 
       <View style={styles.rail}>
-        <Pressable
-          style={styles.railBtn}
-          onPress={() => setLiked((previous) => !previous)}
-          hitSlop={8}
-        >
-          <Text
-            style={[
-              styles.railIcon,
-              liked && { color: COLORS.coral },
-            ]}
-          >
-            ♥
-          </Text>
-          <Text style={styles.railCount}>{formatCount(likes)}</Text>
-        </Pressable>
-
-        <View style={styles.railBtn}>
-          <Text style={styles.railIcon}>💬</Text>
-          <Text style={styles.railCount}>
-            {formatCount(40 + ((n * 313) % 4000))}
-          </Text>
-        </View>
-
-        <View style={styles.railBtn}>
-          <Text style={styles.railIcon}>↗</Text>
-          <Text style={styles.railCount}>Share</Text>
-        </View>
+        <RailButton
+          icon="♥"
+          label={formatCount(likes)}
+          color={liked ? COLORS.like : COLORS.text}
+          onPress={() => setLiked((v) => !v)}
+          a11y={liked ? 'Unlike' : 'Like'}
+        />
+        <RailButton icon="💬" label={formatCount(40 + ((clip.id * 313) % 4000))} a11y="Comments" />
+        <RailButton
+          icon={saved ? '★' : '☆'}
+          label={saved ? 'Saved' : 'Save'}
+          color={saved ? COLORS.mint : COLORS.text}
+          onPress={() => onSave(index)}
+          a11y={saved ? 'Remove from Saved' : 'Save'}
+        />
+        <RailButton icon="↗" label="Share" a11y="Share" />
       </View>
 
       <View pointerEvents="none" style={styles.caption}>
-        <Text style={styles.user}>
-          @placeholder_{String(n).padStart(2, '0')}
-        </Text>
-        <Text style={styles.text}>
-          Placeholder video {n} · swipe up for the next one
+        {/* M5: a thin progress line for the video, above the caption */}
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${Math.round(progress * 1000) / 10}%` }]} />
+        </View>
+        <Text style={styles.user}>{clip.user}</Text>
+        <Text style={styles.text} numberOfLines={2}>
+          {clip.caption}
         </Text>
       </View>
+
+      {/* keep the bar area readable over bright clips */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={['rgba(0,0,0,0.45)', 'transparent']}
+        style={[styles.topShade, { height: topInset + 110 }]}
+      />
     </View>
   );
 }
 
+function RailButton({
+  icon,
+  label,
+  color = COLORS.text,
+  onPress,
+  a11y,
+}: {
+  icon: string;
+  label: string;
+  color?: string;
+  onPress?: () => void;
+  a11y: string;
+}) {
+  return (
+    <Pressable
+      style={styles.railBtn}
+      onPress={onPress}
+      disabled={!onPress}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={a11y}
+    >
+      <Text style={[styles.railIcon, { color }]}>{icon}</Text>
+      <Text style={styles.railLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/** Real clip playback, used once a clip in src/clips.ts has a `source`. */
+function ClipVideo({ source, active, playing }: { source: VideoSource; active: boolean; playing: boolean }) {
+  const player = useVideoPlayer(source, (p) => {
+    p.loop = true;
+    p.muted = VIDEO_MUTED;
+  });
+
+  useEffect(() => {
+    if (playing) player.play();
+    else player.pause();
+  }, [playing, player]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability -- expo-video exposes seeking as a settable property
+    if (!active) player.currentTime = 0;
+  }, [active, player]);
+
+  return (
+    <VideoView
+      player={player}
+      style={StyleSheet.absoluteFill}
+      contentFit="cover"
+      nativeControls={false}
+      allowsPictureInPicture={false}
+    />
+  );
+}
+
 function formatCount(n: number) {
-  return n >= 1000
-    ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K`
-    : String(n);
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K` : String(n);
 }
 
 export const FeedItem = memo(FeedItemBase);
 
 const styles = StyleSheet.create({
-  gradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '38%',
-  },
+  gradient: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '40%' },
+  topShade: { position: 'absolute', left: 0, right: 0, top: 0 },
   pauseWrap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pauseGlyph: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 72,
-  },
-  rail: {
-    position: 'absolute',
-    right: 10,
-    bottom: 110,
-    alignItems: 'center',
-    gap: 18,
-  },
-  railBtn: {
-    alignItems: 'center',
-    gap: 2,
-  },
+  pauseGlyph: { color: 'rgba(255,255,255,0.85)', fontSize: 72 },
+  rail: { position: 'absolute', right: 8, bottom: 96, alignItems: 'center', gap: 16 },
+  railBtn: { alignItems: 'center', minWidth: 52, minHeight: 44, gap: 2 },
   railIcon: {
-    color: COLORS.text,
-    fontSize: 32,
+    fontSize: 30,
     textShadowColor: 'rgba(0,0,0,0.5)',
     textShadowRadius: 6,
   },
-  railCount: {
-    color: COLORS.text,
-    fontSize: 12,
-    fontWeight: '600',
+  railLabel: { color: COLORS.text, fontSize: 12, fontWeight: '600' },
+  caption: { position: 'absolute', left: 16, right: 84, bottom: 20, gap: 4 },
+  progressTrack: {
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    overflow: 'hidden',
+    marginBottom: 8,
   },
-  caption: {
-    position: 'absolute',
-    left: 14,
-    right: 84,
-    bottom: 40,
-    gap: 4,
-  },
-  user: {
-    color: COLORS.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  text: {
-    color: COLORS.text,
-    fontSize: 14,
-    opacity: 0.9,
-  },
+  progressFill: { height: '100%', backgroundColor: 'rgba(255,255,255,0.9)' },
+  user: { color: COLORS.text, fontSize: TYPE.headline, fontWeight: '700' },
+  text: { color: COLORS.text, fontSize: TYPE.subhead, opacity: 0.92 },
 });

@@ -1,43 +1,46 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DAY_MS, MAX_LIMIT, MIN_LIMIT } from './config';
+import { DEFAULT_BREAK, PRESETS } from './config';
+import type { Session } from './session';
 
-export type Session = {
-  limit: number; // scrolls allowed in this 24h window
-  count: number; // scrolls used so far
-  startedAt: number; // ms epoch, when the user picked their limit
-  resetAt: number; // ms epoch, startedAt + 24h
+export type { Session } from './session';
+
+export type Settings = {
+  defaultBreak: number; // "Your usual", set on the You tab
+  lastBreak?: number; // pre-selected next time ("Same as last time", M14)
+  askOnOpen: boolean; // "Ask what I'm here for when I open the app" (M29)
+  askOnSave: boolean; // "Ask me each time I save" (M21)
+  position: number; // feed index, so your place in the feed is kept
+  library: number[]; // saved clip ids, most recent first (Saved tab)
 };
 
-const KEY = 'scrollLimit.session.v1';
+export const DEFAULT_SETTINGS: Settings = {
+  defaultBreak: DEFAULT_BREAK,
+  askOnOpen: true,
+  askOnSave: true,
+  position: 0,
+  library: [],
+};
 
-export function createSession(limit: number, now = Date.now()): Session {
-  return { limit, count: 0, startedAt: now, resetAt: now + DAY_MS };
-}
+const SESSION_KEY = 'purposeBar.session.v1';
+const SETTINGS_KEY = 'purposeBar.settings.v1';
 
-function isValid(s: any): s is Session {
+function isSession(s: any): s is Session {
   return (
     s &&
-    Number.isInteger(s.limit) &&
-    s.limit >= MIN_LIMIT &&
-    s.limit <= MAX_LIMIT &&
-    Number.isInteger(s.count) &&
-    s.count >= 0 &&
+    typeof s.id === 'string' &&
     Number.isFinite(s.startedAt) &&
-    Number.isFinite(s.resetAt)
+    Array.isArray(s.segments) &&
+    Array.isArray(s.watched) &&
+    Array.isArray(s.saved)
   );
 }
 
-/** Returns the active session, or null if none exists or the 24h window is over. */
-export async function loadSession(now = Date.now()): Promise<Session | null> {
+export async function loadSession(): Promise<Session | null> {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await AsyncStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!isValid(parsed) || parsed.resetAt <= now) {
-      await AsyncStorage.removeItem(KEY);
-      return null;
-    }
-    return { ...parsed, count: Math.min(parsed.count, parsed.limit) };
+    return isSession(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -45,7 +48,7 @@ export async function loadSession(now = Date.now()): Promise<Session | null> {
 
 export async function saveSession(session: Session): Promise<void> {
   try {
-    await AsyncStorage.setItem(KEY, JSON.stringify(session));
+    await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch {
     // Best effort: the in-memory session still works for this run.
   }
@@ -53,6 +56,30 @@ export async function saveSession(session: Session): Promise<void> {
 
 export async function clearSession(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(KEY);
+    await AsyncStorage.removeItem(SESSION_KEY);
+  } catch {}
+}
+
+export async function loadSettings(): Promise<Settings> {
+  try {
+    const raw = await AsyncStorage.getItem(SETTINGS_KEY);
+    if (!raw) return DEFAULT_SETTINGS;
+    const p = JSON.parse(raw);
+    return {
+      defaultBreak: PRESETS.includes(p.defaultBreak) ? p.defaultBreak : DEFAULT_BREAK,
+      lastBreak: PRESETS.includes(p.lastBreak) ? p.lastBreak : undefined,
+      askOnOpen: typeof p.askOnOpen === 'boolean' ? p.askOnOpen : true,
+      askOnSave: typeof p.askOnSave === 'boolean' ? p.askOnSave : true,
+      position: Number.isInteger(p.position) && p.position >= 0 ? p.position : 0,
+      library: Array.isArray(p.library) ? p.library.filter(Number.isInteger) : [],
+    };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+export async function saveSettings(settings: Settings): Promise<void> {
+  try {
+    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {}
 }

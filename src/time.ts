@@ -12,21 +12,15 @@ export function useNow(intervalMs = 1000): number {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** 23h 41m  /  12m 03s  — compact, for the feed header. */
-export function formatShort(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
+/** 2:30 — remaining video / task time. */
+export function formatClock(seconds: number): string {
+  const total = Math.max(0, Math.ceil(seconds));
+  const m = Math.floor(total / 60);
   const s = total % 60;
-  if (h > 0) return `${h}h ${pad(m)}m`;
-  return `${m}m ${pad(s)}s`;
+  return `${m}:${pad(s)}`;
 }
 
-/** 23:41:07 — for the lockout countdown. */
-export function formatClock(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+/** "4 min" — session length. */
+export function formatMinutes(ms: number): string {
+  return `${Math.max(1, Math.round(ms / 60_000))} min`;
 }

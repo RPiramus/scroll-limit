@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "Scroll Limit",
+    "name": "Purpose Bar",
     "slug": "scroll-limit",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#000000",
+    "backgroundColor": "#0B0B0F",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.phil6969.scroll-limit"
@@ -22,6 +22,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-image",
+      "expo-status-bar",
+      "expo-video"
+    ]
   }
 }
